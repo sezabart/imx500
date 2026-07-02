@@ -1,9 +1,9 @@
-# IMX500 Street Monitor
+# IMX500 Hallway Monitor
 
-Headless street activity monitor built on a Raspberry Pi Zero 2W and Sony IMX500 AI camera.
-Detects and logs vehicles, pedestrians, and other objects on a residential street using
+Headless hallway activity monitor built on a Raspberry Pi Zero 2W and Sony IMX500 AI camera.
+Detects and logs visitors and pets in a hallway using
 on-sensor inference (SSD MobileNetV2 FPN Lite, COCO labels). Runs automatically from
-sunrise to sunset, with a live WebSocket stream and a historical event dashboard
+set times, with a live WebSocket stream and a historical event dashboard
 available 24/7.
 
 **Hardware:** Raspberry Pi Zero 2W · Sony IMX500 AI Camera  
@@ -71,7 +71,7 @@ sudo apt update && sudo apt upgrade -y && sudo apt install -y git && sudo reboot
 ### Clone the Repository
 ```bash
 cd ~
-git clone https://github.com/USERNAME/imx500.git
+git clone https://github.com/sezabart/imx500.git
 ```
 
 ### Prevent Permission Change Conflicts
@@ -187,71 +187,6 @@ journalctl --user -u imx500_capture.service -f
 
 ---
 
-## Daylight-Only Operation
-
-The capture service runs only between sunrise and sunset. The HTTP and WebSocket
-server runs 24/7 — the dashboard is always accessible regardless of time of day.
-
-### How it works
-
-During `imx500pi_provision_service.sh`, you are prompted for a US zip code.
-The script resolves this offline using the `pgeocode` library (no API key or
-internet connection required at runtime) and writes the resolved coordinates
-to `~/imx500/config.json`:
-
-```json
-{
-  "location": {
-    "zip": "48838",
-    "place": "Greenville, Michigan",
-    "latitude": 43.1793,
-    "longitude": -85.2497
-  },
-  "logging": {
-    "max_log_files": 30
-  }
-}
-```
-
-A systemd timer starts the capture service each morning at 03:00. The wrapper
-script (`imx500_capture_wrapper.sh`) then:
-
-1. Reads `config.json` to get the lat/long
-2. Calls the `astral` Python library to calculate today's sunrise and sunset times
-3. Sleeps until sunrise
-4. Runs `build_summary.py` to rebuild `summary.json` from all historical logs
-5. Launches `imx500_capture.py` at sunrise
-6. Stops the capture script at sunset and exits cleanly
-
-A clean exit tells systemd not to restart the service — it stays stopped until
-the 03:00 timer fires the next morning.
-
-### Typical daily cycle
-
-```
-03:00  →  Timer fires → wrapper starts → calculates today's sunrise/sunset
-           → sleeps until sunrise (e.g. 6:43 AM)
-06:43  →  Wrapper wakes → builds summary.json → launches imx500_capture.py
-           → TimedRotatingFileHandler detects midnight has passed since last
-             run, renames yesterday's log (events.jsonl.YYYY-MM-DD), starts
-             a fresh events.jsonl for today
-           → capture script connects to server frame socket, begins streaming
-20:35  →  Sunset reached → wrapper stops capture script → exits cleanly
-           → server keeps running, dashboard still accessible
-           → systemd does NOT restart capture (clean exit)
-03:00  →  Next morning, timer fires again → repeat
-```
-
-### Updating your location
-
-To change the zip code, re-run the service provisioning script with `--reset`:
-
-```bash
-sudo ./imx500pi_provision_service.sh --reset
-```
-
-This will prompt for a new zip code, resolve new coordinates, rewrite
-`config.json`, and restart both services.
 
 ### Controlling log file retention
 
@@ -271,27 +206,6 @@ imx500 restart imx500_capture.service
 
 If `max_log_files` is missing from `config.json`, the capture script defaults
 to 30.
-
-### Checking today's sunrise and sunset
-
-```bash
-~/imx500_venv/bin/python3 - <<'PYEOF'
-import json
-from pathlib import Path
-from astral import LocationInfo
-from astral.sun import sun
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
-config = json.loads(Path("~/imx500/config.json").expanduser().read_text())
-tz = ZoneInfo("localtime")
-loc = LocationInfo(latitude=config["location"]["latitude"],
-                   longitude=config["location"]["longitude"])
-s = sun(loc.observer, date=datetime.now(tz).date(), tzinfo=tz)
-print(f"Sunrise: {s['sunrise'].strftime('%I:%M %p %Z')}")
-print(f"Sunset:  {s['sunset'].strftime('%I:%M %p %Z')}")
-PYEOF
-```
 
 ---
 
