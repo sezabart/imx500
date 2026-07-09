@@ -1,4 +1,4 @@
-# IMX500 Street Monitor — Camera Tuning Guide
+# IMX500 Visitor Counter — Camera Tuning Guide
 
 This guide covers all the parameters available for tuning detection quality,
 filtering noise, and controlling how events are logged. Changes are made
@@ -35,7 +35,7 @@ for label, confs in sorted(label_conf.items(), key=lambda x: -len(x[1])):
 ```
 
 Look for:
-- Labels that are impossible for your scene (boat, sheep, airplane on a street)
+- Labels that are impossible for your scene (boat, sheep, airplane in a hallway)
 - Labels clustering at a narrow, low confidence band — this is the model's
   floor, not genuine detections
 - Legitimate labels with very low average confidence — these may generate
@@ -63,7 +63,7 @@ primary and most powerful filter.
 - A useful signal: if spurious labels are all clustering at nearly the same
   confidence value (e.g. all at `0.379`), that is the model's floor for that
   scene — raise the threshold just above it.
-- Start with `0.42` for a residential street scene with SSD MobileNetV2.
+- Start with `0.42` for an indoor hallway scene with SSD MobileNetV2.
   The legitimate vehicle detections typically average `0.48–0.55`, giving
   comfortable headroom above the noise floor.
 - Test by running a full day and re-running the diagnostic query above.
@@ -87,7 +87,7 @@ your scene.
 
 **Tuning guidance:**
 
-- Add any label that appears in your logs but can never occur on your street.
+- Add any label that appears in your logs but can never occur in your scene.
   Common culprits with SSD MobileNetV2 on residential scenes: boat, sheep,
   airplane, umbrella, keyboard, train.
 - These labels typically appear near the model's confidence floor (around
@@ -151,11 +151,11 @@ enter the pending or confirmed track pools.
 **Tuning guidance:**
 
 - The minimum area (`w * h < 400`) corresponds roughly to a 20×20 pixel box.
-  Objects smaller than this are unlikely to be meaningful at street scale.
+  Objects smaller than this are unlikely to be meaningful at hallway scale.
 - The maximum size limits (`w > 400`, `h > 300`) are calibrated for the
   320×320 model input scaled to the camera's output resolution. If you see
   detections covering most of the frame with a plausible label, tighten these.
-- Adjust these if your camera is mounted closer to the street or uses a
+- Adjust these if your camera is mounted closer to the hallway or uses a
   different lens focal length.
 
 ---
@@ -179,7 +179,7 @@ existing track's last known center for them to be considered the same object.
 Too small causes fast-moving objects to spawn duplicate tracks. Too large
 causes unrelated objects to merge into a single track.
 
-At 160px, a vehicle moving at normal street speed across the frame in about
+At 160px, a person moving at normal walking speed across the frame in about
 3 seconds will stay matched between frames at typical inference rates.
 
 ### MIN_CONSECUTIVE
@@ -189,8 +189,8 @@ Setting this to `1` logs every single detection, including single-frame
 spurious hits. Setting it to `3` or higher adds latency before an event is
 logged and may miss fast-moving objects.
 
-`2` is a good default for street traffic — it filters single-frame noise
-without significantly delaying detection of moving vehicles.
+`2` is a good default for hallway traffic — it filters single-frame noise
+without significantly delaying detection of moving visitors.
 
 ### MAX_MISSED
 A confirmed track is allowed to go unmatched for this many consecutive frames
@@ -207,8 +207,8 @@ for that label will be logged until this many seconds have elapsed. This
 prevents a single slow-moving vehicle from generating dozens of enter events
 as it traverses the frame.
 
-`10` seconds is appropriate for a residential street where vehicles pass
-through the frame in 3–10 seconds. For a wider scene where vehicles may be
+`10` seconds is appropriate for an indoor hallway where visitors pass
+through the frame in 3–10 seconds. For a wider scene where visitors may be
 visible for longer, increase this.
 
 ---

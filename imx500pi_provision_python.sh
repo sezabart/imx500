@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ################################################################################
-# Raspberry Pi IMX500 Street Monitor - Python Environment Provisioning Script
+# Raspberry Pi IMX500 Visitor Counter - Python Environment Provisioning Script
 ################################################################################
 # This script creates a Python virtual environment with all required packages
-# for the IMX500 AI camera street monitoring system.
+# for the IMX500 AI camera visitor counting system.
 #
 # Note: picamera2 and imx500-all are installed via apt (not pip) and are made
 # available inside the venv via --system-site-packages.
@@ -61,8 +61,7 @@ readonly DEFAULT_APT_PACKAGES=(
 readonly DEFAULT_REQUIREMENTS=(
     "opencv-python-headless"   # OpenCV without Qt/display deps (headless Pi)
     "websockets"               # WebSocket server for live stream (imx500_capture.py)
-    "astral"                   # Sunrise/sunset calculation for daylight-only operation
-    "pgeocode"                 # Offline zip code to lat/long resolution (no API key needed)
+
 )
 
 ### Variables
@@ -460,23 +459,7 @@ verify_packages() {
         return 1
     fi
 
-    # Verify astral
-    log "INFO" "Checking astral..."
-    if sudo -u "$ACTUAL_USER" bash -c "source '$VENV_DIR/bin/activate' && python3 -c 'import astral; print(\"astral version:\", astral.__version__)'" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "astral verified"
-    else
-        log "ERROR" "astral not importable"
-        return 1
-    fi
 
-    # Verify pgeocode
-    log "INFO" "Checking pgeocode..."
-    if sudo -u "$ACTUAL_USER" bash -c "source '$VENV_DIR/bin/activate' && python3 -c 'import pgeocode; print(\"pgeocode version:\", pgeocode.__version__)'" 2>&1 | tee -a "$LOG_FILE"; then
-        log "INFO" "pgeocode verified"
-    else
-        log "ERROR" "pgeocode not importable"
-        return 1
-    fi
 
     # List all installed packages
     log "INFO" "Installed packages:"
@@ -610,4 +593,4 @@ log "INFO" "  source $VENV_DIR/bin/activate"
 log "INFO" ""
 log "INFO" "To verify the installation:"
 log "INFO" "  source $VENV_DIR/bin/activate"
-log "INFO" "  python3 -c 'import picamera2, cv2, websockets, astral, pgeocode; print(\"All imports OK\")'"
+log "INFO" "  python3 -c 'import picamera2, cv2, websockets; print(\"All imports OK\")'"

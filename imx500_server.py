@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-imx500_server.py — Always-on HTTP and WebSocket server for the IMX500 street monitor.
+imx500_server.py — Always-on HTTP and WebSocket server for the IMX500 visitor counter.
 
 Runs as a standalone systemd service (imx500_server.service) that starts at boot
 and stays up 24/7. Serves:
@@ -11,7 +11,7 @@ and stays up 24/7. Serves:
 
 Frames arrive from imx500_capture.py via a Unix domain socket at
 /tmp/imx500_frames.sock. When the capture script is not running the frame
-buffer is empty and the live view shows "waiting for camera..." until sunrise.
+buffer is empty and the live view shows "waiting for camera..." until the capture service starts.
 
 Usage:
     Called by systemd — not intended for direct invocation.

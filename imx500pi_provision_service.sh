@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ################################################################################
-# Raspberry Pi IMX500 Street Monitor - Service Provisioning Script
+# Raspberry Pi IMX500 Visitor Counter - Service Provisioning Script
 ################################################################################
 # Installs and configures two systemd user services:
 #
@@ -10,7 +10,7 @@ set -euo pipefail
 #                             Starts at boot, runs 24/7.
 #
 #   imx500_capture.service  — Camera capture, inference, event logging.
-#                             Gated to sunrise/sunset by wrapper script.
+#                             Gated to configurable daily schedule by wrapper script.
 #                             Started by imx500_capture.timer at 03:00 daily.
 #
 # Prerequisites:
@@ -128,12 +128,12 @@ check_existing_provision() {
     local all_ok=true
 
     if [[ -f "$CONFIG_JSON" ]]; then
-        local zip place
-        zip=$(python3   -c "import json; d=json.load(open('$CONFIG_JSON')); print(d['location']['zip'])"   2>/dev/null || echo "unknown")
-        place=$(python3 -c "import json; d=json.load(open('$CONFIG_JSON')); print(d['location']['place'])" 2>/dev/null || echo "unknown")
-        log "INFO" "  [OK]      config.json exists (zip: $zip, place: $place)"
+        local sched_start sched_stop
+        sched_start=$(python3 -c "import json; d=json.load(open('$CONFIG_JSON')); print(d['schedule']['start'])" 2>/dev/null || echo "unknown")
+        sched_stop=$(python3  -c "import json; d=json.load(open('$CONFIG_JSON')); print(d['schedule']['stop'])"  2>/dev/null || echo "unknown")
+        log "INFO" "  [OK]      config.json exists (schedule: ${sched_start}–${sched_stop})"
     else
-        log "INFO" "  [MISSING] config.json not found — zip code will be prompted"
+        log "INFO" "  [MISSING] config.json not found — schedule will be prompted"
         all_ok=false
     fi
 
@@ -193,15 +193,7 @@ if [[ ! -f "$SERVER_SCRIPT" ]]; then
     exit 1
 fi
 
-if ! sudo -u "$ACTUAL_USER" "$VENV_PYTHON" -c "import astral" 2>/dev/null; then
-    log "ERROR" "astral not available in venv — run imx500pi_provision_python.sh first"
-    exit 1
-fi
 
-if ! sudo -u "$ACTUAL_USER" "$VENV_PYTHON" -c "import pgeocode" 2>/dev/null; then
-    log "ERROR" "pgeocode not available in venv — run imx500pi_provision_python.sh first"
-    exit 1
-fi
 
 log "INFO" "Prerequisites validated"
 
@@ -232,47 +224,31 @@ fi
 ################################################################################
 ### 3. Write config.json
 ################################################################################
-log "INFO" "Configuring location..."
+log "INFO" "Configuring schedule..."
 
 if [[ -f "$CONFIG_JSON" && "$RESET_MODE" == false ]]; then
     log "INFO" "config.json already exists — skipping (use --reset to reconfigure)"
 else
     while true; do
         echo ""
-        read -r -p "Enter US zip code for sunrise/sunset calculation: " ZIP_CODE
+        read -r -p "Enter daily start time (HH:MM, default 08:00): " START_TIME
+        START_TIME="${START_TIME:-08:00}"
 
-        if ! [[ "$ZIP_CODE" =~ ^[0-9]{5}$ ]]; then
-            echo "ERROR: Zip code must be exactly 5 digits"
+        if ! [[ "$START_TIME" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
+            echo "ERROR: Start time must be in HH:MM format (00:00–23:59)"
             continue
         fi
 
-        log "INFO" "Resolving zip code $ZIP_CODE..."
+        read -r -p "Enter daily stop time  (HH:MM, default 22:00): " STOP_TIME
+        STOP_TIME="${STOP_TIME:-22:00}"
 
-        LOCATION_RESULT=$(sudo -u "$ACTUAL_USER" "$VENV_PYTHON" - <<PYEOF
-import pgeocode, sys
-nomi = pgeocode.Nominatim("us")
-result = nomi.query_postal_code("${ZIP_CODE}")
-if result is None or str(result.get("latitude", "")) == "nan":
-    print("ERROR")
-    sys.exit(1)
-print(f"{result['place_name']},{result['state_name']},{result['latitude']:.6f},{result['longitude']:.6f}")
-PYEOF
-        )
-
-        if [[ "$LOCATION_RESULT" == "ERROR" || -z "$LOCATION_RESULT" ]]; then
-            echo "ERROR: Could not resolve zip code $ZIP_CODE — please try again"
+        if ! [[ "$STOP_TIME" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
+            echo "ERROR: Stop time must be in HH:MM format (00:00–23:59)"
             continue
         fi
-
-        PLACE_NAME=$(echo "$LOCATION_RESULT" | cut -d',' -f1)
-        STATE_NAME=$(echo "$LOCATION_RESULT" | cut -d',' -f2)
-        LATITUDE=$(echo "$LOCATION_RESULT"   | cut -d',' -f3)
-        LONGITUDE=$(echo "$LOCATION_RESULT"  | cut -d',' -f4)
 
         echo ""
-        echo "  Location: ${PLACE_NAME}, ${STATE_NAME}"
-        echo "  Latitude: ${LATITUDE}"
-        echo "  Longitude: ${LONGITUDE}"
+        echo "  Schedule: ${START_TIME} – ${STOP_TIME}"
         echo ""
         read -r -p "Is this correct? (y/n): " CONFIRM
 
@@ -283,11 +259,9 @@ PYEOF
 
     cat > "$CONFIG_JSON" << EOF
 {
-  "location": {
-    "zip": "${ZIP_CODE}",
-    "place": "${PLACE_NAME}, ${STATE_NAME}",
-    "latitude": ${LATITUDE},
-    "longitude": ${LONGITUDE}
+  "schedule": {
+    "start": "${START_TIME}",
+    "stop": "${STOP_TIME}"
   },
   "logging": {
     "max_log_files": 30
@@ -471,7 +445,7 @@ log "INFO" "Config: $CONFIG_JSON"
 log "INFO" "========================================="
 log "INFO" "Services:"
 log "INFO" "  imx500_server.service   — always-on, starts at boot"
-log "INFO" "  imx500_capture.service  — sunrise to sunset"
+log "INFO" "  imx500_capture.service  — configurable daily schedule"
 log "INFO" "  imx500_capture.timer    — restarts capture at 03:00 daily"
 log "INFO" "========================================="
 log "INFO" "Service alias added to ~/.bashrc:"

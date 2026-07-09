@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ################################################################################
-# Raspberry Pi IMX500 Street Monitor Provisioning Script
+# Raspberry Pi IMX500 Visitor Counter Provisioning Script
 ################################################################################
 # This script provisions a Raspberry Pi for headless operation as an AI
-# camera street monitoring station. It enables the camera interface,
+# camera visitor counting station. It enables the camera interface,
 # optimizes GPU memory for the IMX500 camera stack, and prepares the
 # log directory.
 #

@@ -2,20 +2,20 @@
 ################################################################################
 # IMX500 Capture Wrapper Script
 ################################################################################
-# Wraps imx500_capture.py with sunrise/sunset gating. Called by the
-# systemd service unit. Reads lat/long from config.json, sleeps until sunrise,
-# runs the capture script until sunset, then exits cleanly.
+# Wraps imx500_capture.py with a configurable daily schedule. Called by the
+# systemd service unit. Reads start/stop times from config.json, sleeps until
+# the start time, runs the capture script until the stop time, then exits
+# cleanly.
 #
 # A clean exit tells systemd not to restart the service. The daily 03:00 timer
-# restarts the service each morning, which re-evaluates sunrise/sunset for the
+# restarts the service each morning, which re-evaluates the schedule for the
 # current day.
 #
 # The HTTP and WebSocket server (imx500_server.py) runs as a separate always-on
 # service and is NOT managed by this wrapper.
 #
 # Dependencies:
-#   - astral (pip)
-#   - config.json in the repo root with latitude and longitude fields
+#   - config.json in the repo root with schedule.start and schedule.stop fields
 #   - imx500_server.service running (started at boot, independent of this script)
 #
 # Usage:
@@ -52,16 +52,14 @@ if [[ ! -f "$CAPTURE_SCRIPT" ]]; then
     exit 1
 fi
 
-# ── Resolve sunrise/sunset via astral ────────────────────────────────────────
-log "INFO" "Calculating sunrise/sunset from config.json..."
+# ── Read schedule from config.json ───────────────────────────────────────────
+log "INFO" "Reading schedule from config.json..."
 
-read -r SUNRISE_EPOCH SUNSET_EPOCH < <(
+read -r START_EPOCH STOP_EPOCH < <(
     "$VENV_PYTHON" - <<'PYEOF'
 import json, os, sys
 from pathlib import Path
-from astral import LocationInfo
-from astral.sun import sun
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 script_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -70,53 +68,57 @@ config_path = Path(script_dir) / "config.json"
 with open(config_path) as f:
     config = json.load(f)
 
-lat = config["location"]["latitude"]
-lng = config["location"]["longitude"]
+schedule = config.get("schedule", {})
+start_str = schedule.get("start", "08:00")
+stop_str  = schedule.get("stop",  "22:00")
 
-local_tz   = ZoneInfo("localtime")
+local_tz    = ZoneInfo("localtime")
 today_local = datetime.now(local_tz).date()
 
-location = LocationInfo(latitude=lat, longitude=lng)
-s = sun(location.observer, date=today_local, tzinfo=local_tz)
+start_h, start_m = map(int, start_str.split(":"))
+stop_h,  stop_m  = map(int, stop_str.split(":"))
 
-print(int(s["sunrise"].timestamp()), int(s["sunset"].timestamp()))
+start_dt = datetime.combine(today_local, time(start_h, start_m), tzinfo=local_tz)
+stop_dt  = datetime.combine(today_local, time(stop_h,  stop_m),  tzinfo=local_tz)
+
+print(int(start_dt.timestamp()), int(stop_dt.timestamp()))
 PYEOF
 )
 
-if [[ -z "$SUNRISE_EPOCH" || -z "$SUNSET_EPOCH" ]]; then
-    log "ERROR" "Failed to calculate sunrise/sunset times"
+if [[ -z "$START_EPOCH" || -z "$STOP_EPOCH" ]]; then
+    log "ERROR" "Failed to read schedule times from config.json"
     exit 1
 fi
 
 NOW_EPOCH=$(date +%s)
-SUNRISE_FMT=$(date -d "@${SUNRISE_EPOCH}" +'%H:%M:%S')
-SUNSET_FMT=$(date -d  "@${SUNSET_EPOCH}"  +'%H:%M:%S')
+START_FMT=$(date -d "@${START_EPOCH}" +'%H:%M:%S')
+STOP_FMT=$(date -d  "@${STOP_EPOCH}"  +'%H:%M:%S')
 
-log "INFO" "Today's sunrise: ${SUNRISE_FMT}  sunset: ${SUNSET_FMT}"
+log "INFO" "Today's schedule: ${START_FMT} – ${STOP_FMT}"
 
-# ── Sleep until sunrise if we're early ───────────────────────────────────────
-if [[ $NOW_EPOCH -lt $SUNRISE_EPOCH ]]; then
-    SLEEP_S=$(( SUNRISE_EPOCH - NOW_EPOCH ))
-    log "INFO" "Before sunrise — sleeping ${SLEEP_S}s until ${SUNRISE_FMT}"
+# ── Sleep until start time if we're early ────────────────────────────────────
+if [[ $NOW_EPOCH -lt $START_EPOCH ]]; then
+    SLEEP_S=$(( START_EPOCH - NOW_EPOCH ))
+    log "INFO" "Before start time — sleeping ${SLEEP_S}s until ${START_FMT}"
     sleep "$SLEEP_S"
-    log "INFO" "Sunrise reached — starting capture"
-elif [[ $NOW_EPOCH -gt $SUNSET_EPOCH ]]; then
-    log "INFO" "Already past sunset (${SUNSET_FMT}) — nothing to do today, exiting cleanly"
+    log "INFO" "Start time reached — starting capture"
+elif [[ $NOW_EPOCH -gt $STOP_EPOCH ]]; then
+    log "INFO" "Already past stop time (${STOP_FMT}) — nothing to do today, exiting cleanly"
     exit 0
 else
-    log "INFO" "Within daylight window — starting capture immediately"
+    log "INFO" "Within schedule window — starting capture immediately"
 fi
 
-# ── Calculate how long to run until sunset ───────────────────────────────────
+# ── Calculate how long to run until stop time ────────────────────────────────
 NOW_EPOCH=$(date +%s)
-RUN_S=$(( SUNSET_EPOCH - NOW_EPOCH ))
+RUN_S=$(( STOP_EPOCH - NOW_EPOCH ))
 
 if [[ $RUN_S -le 0 ]]; then
-    log "INFO" "Sunset already passed — exiting cleanly"
+    log "INFO" "Stop time already passed — exiting cleanly"
     exit 0
 fi
 
-log "INFO" "Capture will run for ${RUN_S}s (until ${SUNSET_FMT})"
+log "INFO" "Capture will run for ${RUN_S}s (until ${STOP_FMT})"
 
 # ── Rotate yesterday's event log if needed ───────────────────────────────────
 EVENTS_LOG="${LOG_DIR}/events.jsonl"
@@ -146,12 +148,11 @@ log "INFO" "Building event summary for dashboard..."
     && log "INFO" "summary.json written" \
     || log "WARN" "build_summary.py failed — dashboard may show stale data"
 
-# ── Launch capture script, kill at sunset ────────────────────────────────────
-# ── Launch capture script, restart on crash, kill at sunset ──────────────────
+# ── Launch capture script, restart on crash, stop at scheduled time ──────────
 while true; do
     NOW_EPOCH=$(date +%s)
-    if [[ $NOW_EPOCH -ge $SUNSET_EPOCH ]]; then
-        log "INFO" "Sunset reached — exiting"
+    if [[ $NOW_EPOCH -ge $STOP_EPOCH ]]; then
+        log "INFO" "Stop time reached — exiting"
         exit 0
     fi
 
@@ -160,14 +161,14 @@ while true; do
     CAPTURE_PID=$!
     log "INFO" "Capture PID: ${CAPTURE_PID}"
 
-    # Wait for either the capture script to exit or sunset
+    # Wait for either the capture script to exit or stop time
     while kill -0 "$CAPTURE_PID" 2>/dev/null; do
-        if [[ $(date +%s) -ge $SUNSET_EPOCH ]]; then
-            log "INFO" "Sunset reached — stopping capture"
+        if [[ $(date +%s) -ge $STOP_EPOCH ]]; then
+            log "INFO" "Stop time reached — stopping capture"
             kill -TERM "$CAPTURE_PID" 2>/dev/null || true
             sleep 3
             kill -KILL "$CAPTURE_PID" 2>/dev/null || true
-            log "INFO" "Capture stopped at sunset"
+            log "INFO" "Capture stopped at scheduled stop time"
             exit 0
         fi
         sleep 5
@@ -176,4 +177,3 @@ while true; do
     log "WARN" "Capture script exited unexpectedly — restarting in 10s"
     sleep 10
 done
-

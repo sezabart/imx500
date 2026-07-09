@@ -1,7 +1,7 @@
-# IMX500 Hallway Monitor
+# IMX500 Visitor Counter
 
-Headless hallway activity monitor built on a Raspberry Pi Zero 2W and Sony IMX500 AI camera.
-Detects and logs visitors and pets in a hallway using
+Headless exposition visitor counter built on a Raspberry Pi Zero 2W and Sony IMX500 AI camera.
+Detects and logs visitors in a hallway using
 on-sensor inference (SSD MobileNetV2 FPN Lite, COCO labels). Runs automatically from
 set times, with a live WebSocket stream and a historical event dashboard
 available 24/7.

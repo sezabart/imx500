@@ -2,7 +2,7 @@
 """
 imx500_capture.py — Camera capture, AI inference, and event logging.
 
-Runs sunrise-to-sunset under imx500_capture_wrapper.sh / imx500_capture.service.
+Runs on a configurable daily schedule under imx500_capture_wrapper.sh / imx500_capture.service.
 Sends annotated JPEG frames to imx500_server.py via a Unix domain socket so the
 always-on server can broadcast them to WebSocket clients.
 
@@ -73,12 +73,12 @@ _event_logger.addHandler(_log_handler)
 #   - Pending candidates are matched by proximity + same label group, so two
 #     genuinely different objects close together don't merge before confirmation.
 #   - Raw model labels are normalized before use: "car" and "truck" both become
-#     "vehicle" since SSD MobileNetV2 routinely confuses them on street scenes.
+#     "vehicle" since SSD MobileNetV2 routinely confuses them on indoor scenes.
 #
 # Tuning parameters:
 #   MAX_DIST        — max bbox-center distance (px) to match a detection to an
 #                     existing track. Should comfortably exceed per-frame
-#                     movement at street speed.
+#                     movement at walking speed.
 #   MIN_CONSECUTIVE — frames a new detection must appear before logging "enter"
 #   MAX_MISSED      — frames a confirmed track can go unmatched before "exit"
 #   COOLDOWN_S      — minimum seconds between "enter" events for the same label
@@ -349,6 +349,7 @@ def draw_detections(request, stream="main") -> None:
         return
     labels = get_labels()
     frame  = request.make_array(stream)
+    frame  = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     for detection in detections:
         x, y, w, h = detection.box
